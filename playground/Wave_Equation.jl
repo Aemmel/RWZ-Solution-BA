@@ -50,6 +50,28 @@ function finiteDiffSecond(vals::Array{Float64}, step_size)::Array{Float64}
         deriv[i] = (vals[i+1] - 2vals[i] + vals[i-1]) / step_size_2
     end
 
+    # above is much faster than below
+
+    # i = 2:length(deriv)-1
+
+    # deriv[i] = (vals[i .+ 1] - 2vals[i] + vals[i .- 1]) / step_size_2
+
+    return deriv
+end
+
+function finiteDiffSecondFourthOrder(vals::Array{Float64}, step_size)::Array{Float64}
+    deriv = copy(vals)
+    step_size_2 = step_size^2
+
+    fac_1 = - 1. / 12.
+    fac_2 = 4. / 3.
+    fac_3 = - 5. / 2.
+
+    # deal with the ghost cells later
+    for i = 3:length(deriv)-2
+        deriv[i] = (fac_1*vals[i-2] + fac_2*vals[i-1] + fac_3*vals[i] + fac_2*vals[i+1] + fac_1*vals[i+2]) / step_size_2
+    end
+
     return deriv
 end
 
@@ -88,7 +110,7 @@ function WaveEqAnalytical(w::Wave, step_size)::Wave
     return Wave(w.theta, -w.psi) # test functin psi(x,t) = sin(x)
 end
 
-function main(dt_arg, x_points)
+function main(;dt_arg=0.0001, x_points=2000)
     plotly()
 
     # solution: sin(2pi(x + t))
@@ -96,18 +118,19 @@ function main(dt_arg, x_points)
     init_theta(x) = 2*pi*cos(2*pi*x)
 
     points = x_points
-    x_max = 1
+    x_max = 2
     x_data = range(0, stop=x_max, length=points)
     dx = x_data[2] - x_data[1] # should be equally spaced
     curr_step = Wave(init_psi.(x_data), init_theta.(x_data))
-    curr_step_ana = Wave(init_psi.(x_data), init_theta.(x_data))
 
-    dt = dt_arg
+    CFL_aplha = 1
+
+    dt = CFL_aplha * dx
     t = 0
-    t_max = 1
+    t_max = 10.6
 
     # CFL condition
-    if dt > 0.5*dx
+    if dt > dx
         println("CFL condition not met!")
         return -1
     end
@@ -119,16 +142,24 @@ function main(dt_arg, x_points)
     while t < t_max
         fillGhostCells!(curr_step)
 
+        # Dirichlet for fourth order 
+        # curr_step.psi[1] = sin(2pi*(t))
+        # curr_step.psi[2] = sin(2pi*(dx+t))
+        # curr_step.psi[length(curr_step)] = sin(2pi*(x_max + t))
+        # curr_step.psi[length(curr_step) - 1] = sin(2pi*(x_max - dx + t))
+        # curr_step.theta[1] = 2*pi*cos(2pi*(t))
+        # curr_step.theta[2] = 2*pi*cos(2pi*(dx+t))
+        # curr_step.theta[length(curr_step)] = 2*pi*cos(2pi*(x_max + t))
+        # curr_step.theta[length(curr_step) - 1] = 2*pi*cos(2pi*(x_max - dx + t))
+
         curr_step = RK4(curr_step, WaveEq, dx, dt)
-        curr_step_ana = RK4(curr_step_ana, WaveEqAnalytical, dx, dt)   
 
         t += dt
         cnt += 1
     end
 
-    # plot(x_data, curr_step.psi, label="MOL")
-    #println("dt: " * string(dt) * ", Points: " * string(points) * ", min: " * string(minimum(curr_step.psi)))
-    @printf("dt: %.6f,  Points: %d,  min: %.6f\n", dt, points, minimum(curr_step.psi))
+    plot(x_data, curr_step.psi, label="MOL")
+    # @printf("dt: %.6f,  Points: %d,  min: %.6f\n", dt, points, minimum(curr_step.psi))
 end
 
 # test the second derivative finite difference
@@ -149,13 +180,13 @@ function testFiniteDiff()
     h = 0.01
     x_data = range(0, stop=x_max, step=h)
 
-    f       = f_3
-    f_dd    = f_3_dd
+    f       = f_2
+    f_dd    = f_2_dd
 
     y = f.(x_data)
 
     for i=1:1
-        y = finiteDiffSecond(y, h)
+        y = finiteDiffSecondFourthOrder(y, h)
 
         # periodic boundary conditions
         y[1] = y[length(y) - 1]
@@ -228,13 +259,15 @@ function plotStuff()
     # plot(x_max, y_worst_xmax, label="y worst over xmax")
 end
 
-for p=100:100:2000
-    for dt in 10. .^range(-3, stop=-5, step=-0.1)
-        main(dt, p)
-    end
+main()
 
-    println("-----------------------------------")
-end
+# for p=100:100:2000
+#     for dt in 10. .^range(-3, stop=-5, step=-0.1)
+#         main(dt, p)
+#     end
+
+#     println("-----------------------------------")
+# end
 
 # results
 # dt: 0.001000,  Points: 100,  min: -1.065732
