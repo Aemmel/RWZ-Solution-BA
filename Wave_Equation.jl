@@ -50,11 +50,16 @@ function finiteDiffSecond(vals::Array{Float64}, step_size)::Array{Float64}
         deriv[i] = (vals[i+1] - 2vals[i] + vals[i-1]) / step_size_2
     end
 
-    # above is much faster than below
+    return deriv
+end
 
-    # i = 2:length(deriv)-1
+function finiteDiffSecond(vals::Array{Float64}, step_size)::Array{Float64}
+    deriv = copy(vals)
+    step_size_2 = step_size^2
 
-    # deriv[i] = (vals[i .+ 1] - 2vals[i] + vals[i .- 1]) / step_size_2
+    i = 2:length(deriv)-1
+
+    deriv[i] = (vals[i .+ 1] - 2vals[i] + vals[i .- 1]) / step_size_2
 
     return deriv
 end
