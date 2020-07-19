@@ -53,13 +53,13 @@ function finiteDiffSecond(vals::Array{Float64}, step_size)::Array{Float64}
     return deriv
 end
 
-function finiteDiffSecond(vals::Array{Float64}, step_size)::Array{Float64}
+function finiteDiffPaper(vals::Array{Float64}, step_size)::Array{Float64}
     deriv = copy(vals)
-    step_size_2 = step_size^2
+    step_size_2 = 1. / 12. * step_size^2
 
-    i = 2:length(deriv)-1
-
-    deriv[i] = (vals[i .+ 1] - 2vals[i] + vals[i .- 1]) / step_size_2
+    for i=3:length(deriv)-2
+        deriv[i] = (-vals[i+2] - vals[i-2] + 16.0*(vals[i+1] + vals[i-1]) - 30.0 * vals[i]) / step_size_2
+    end
 
     return deriv
 end
@@ -104,6 +104,10 @@ function fillGhostCells!(vals::Wave)
 
     vals.theta[1] = vals.theta[length(vals) - 1]
     vals.theta[length(vals)] = vals.theta[2]
+end
+
+function fillGhostCellsPaper!(vals::Wave, step_size)
+    vals.psi[2] = -4*vals.theta[3]*step_size
 end
 
 # define our wave equation
