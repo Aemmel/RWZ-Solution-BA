@@ -106,10 +106,6 @@ function fillGhostCells!(vals::Wave)
     vals.theta[length(vals)] = vals.theta[2]
 end
 
-function fillGhostCellsPaper!(vals::Wave, step_size)
-    vals.psi[2] = -4*vals.theta[3]*step_size
-end
-
 # define our wave equation
 function WaveEq(w::Wave, step_size)::Wave
     return Wave(w.theta, finiteDiffSecond(w.psi, step_size))
@@ -119,16 +115,18 @@ function WaveEqAnalytical(w::Wave, step_size)::Wave
     return Wave(w.theta, -w.psi) # test functin psi(x,t) = sin(x)
 end
 
-function main(;dt_arg=0.0001, x_points=2000)
+function main(;dt_arg=0.0001, x_points=401)
     plotly()
 
     # solution: sin(2pi(x + t))
-    init_psi(x) = sin(2*pi*x)
-    init_theta(x) = 2*pi*cos(2*pi*x)
+    # init_psi(x) = sin(2*pi*x)
+    # init_theta(x) = 2*pi*cos(2*pi*x)
+    init_psi(x) = exp(-x^2)
+    init_theta(x) = -2x*exp(-x^2)
 
     points = x_points
-    x_max = 2
-    x_data = range(0, stop=x_max, length=points)
+    x_max = 5
+    x_data = range(-x_max, stop=x_max, length=points)
     dx = x_data[2] - x_data[1] # should be equally spaced
     curr_step = Wave(init_psi.(x_data), init_theta.(x_data))
 
@@ -136,7 +134,7 @@ function main(;dt_arg=0.0001, x_points=2000)
 
     dt = CFL_aplha * dx
     t = 0
-    t_max = 10.6
+    t_max = 1
 
     # CFL condition
     if dt > dx
@@ -167,7 +165,7 @@ function main(;dt_arg=0.0001, x_points=2000)
         cnt += 1
     end
 
-    plot(x_data, curr_step.psi, label="MOL")
+    plot!(x_data, curr_step.psi, label="MOL")
     # @printf("dt: %.6f,  Points: %d,  min: %.6f\n", dt, points, minimum(curr_step.psi))
 end
 
