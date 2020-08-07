@@ -66,11 +66,11 @@ function fillGhostPsi!(vals::Array{Float64}, orig::Wave, step_size)
     vals[i] = -4. *step_size*theta[i-1] - 10. / 3. * psi[i-1] + 6. * psi[i-2] - 2. * psi[i-3] + 1. / 3. * psi[i-4]
 
     i = 1
-    # vals[i] = -20.0*step_size*theta[i+1] - 80. / 3. * psi[i+1] + 40. * psi[i+2] - 15. * psi[i+3] + 8. / 3. * psi[i+4]
-    vals[i] = 5.0*theta[i+1] - 10. * psi[i+2] + 10. * psi[i+3] - 5. * psi[i+4] + psi[i+5]
+    vals[i] = -20.0*step_size*theta[i+1] - 80. / 3. * psi[i+1] + 40. * psi[i+2] - 15. * psi[i+3] + 8. / 3. * psi[i+4]
+    # vals[i] = 5.0*theta[i+1] - 10. * psi[i+2] + 10. * psi[i+3] - 5. * psi[i+4] + psi[i+5]
     i = length(psi)
-    # vals[i] = -20.0*step_size*theta[i-1] - 80. / 3. * psi[i-1] + 40. * psi[i-2] - 15. * psi[i-3] + 8. / 3. * psi[i-4]
-    vals[i] = 5.0*theta[i-1] - 10. * psi[i-2] + 10. * psi[i-3] - 5. * psi[i-4] + psi[i-5]
+    vals[i] = -20.0*step_size*theta[i-1] - 80. / 3. * psi[i-1] + 40. * psi[i-2] - 15. * psi[i-3] + 8. / 3. * psi[i-4]
+    # vals[i] = 5.0*theta[i-1] - 10. * psi[i-2] + 10. * psi[i-3] - 5. * psi[i-4] + psi[i-5]
 end
 
 # fill vals' ghost cells with rule for Theta (in C&G: Pi)
@@ -146,7 +146,7 @@ function RWZRightHandSide(w::Wave, (pot_vals, step_size)::Tuple{Array{Float64}, 
     finiteDiff!(new_theta, psi, step_size)
 
     for i = 1:length(new_theta)
-        new_theta[i] += pot_vals[i] * psi[i]
+        new_theta[i] -= pot_vals[i] * psi[i]
     end
 
     return Wave(new_psi, new_theta)
@@ -165,23 +165,29 @@ function initialDataGauss(x_data, mu, sigma)::Wave
     return Wave(gauss.(x_data), dgauss.(x_data))
 end
 
-function main(;dt_arg=0.0001, x_points=2000)
+function main(; x_points=4000,      # how many x points
+                x_min=-400,         # minimum r_tortoise
+                x_max=+400,         # maximum r_tortoise
+                t_max=150,          # max time (starts at 0)
+                CFL_aplha=1,        # CFL for timestep
+                mass=1,             # mass of the black hole
+                ell=2,              # mode of the perturbation
+                parity=odd,         # axial (odd) or polar (even) perturbation
+                gauss_mu=150,       # mu (offset) for gaussian package
+                gauss_sigma=1,      # sigma for gaussian package
+)
     plotly()
 
-    points = x_points
-    x_min = -200
-    x_max = +200
-    x_data = range(x_min, stop=x_max, length=points)
-    dx = x_data[2] - x_data[1] # should be equally spaced
-
-    curr_step = initialDataGauss(x_data, 150, 4)
-    pot_vals = calcPotential(odd, tortToSchwarz(x_data, 1), 5, 1)
-
-    CFL_aplha = 1
+    # init data
+    x_data = range(x_min, stop=x_max, length=x_points)
+    dx = x_data[2] - x_data[1]
+    curr_step = initialDataGauss(x_data, gauss_mu, gauss_sigma)
+    pot_vals = calcPotential(odd, tortToSchwarz(x_data, 1), ell, mass)
 
     dt = CFL_aplha * dx
+    println("dt="*string(dt))
+    println("dx="*string(dx))
     t = 0
-    t_max = 600
 
     # CFL condition
     if dt > dx
@@ -189,40 +195,40 @@ function main(;dt_arg=0.0001, x_points=2000)
         return -1
     end
 
-    cnt = 0
-    plot_every = 200
+    # detector output
+    detector_pos = 250
+    detector_pos_index = searchsortedfirst(x_data, detector_pos)
+    time_data = []      # x data for detector plot
+    detector_data = []  # y data for detector plot
+
+    cnt = 1
+    plot_every = 10000000
 
     plot(x_data, curr_step.psi, label="starting")
+    #plot!(x_data, calcPotential(odd, tortToSchwarz(x_data, 1), 5, 1))
     #yaxis!((-2, 2))
 
     while t < t_max
-        # Dirichlet for fourth order 
-        # curr_step.psi[1] = sin(2pi*(t))
-        # curr_step.psi[2] = sin(2pi*(dx+t))
-        # curr_step.psi[length(curr_step)] = sin(2pi*(x_max + t))
-        # curr_step.psi[length(curr_step) - 1] = sin(2pi*(x_max - dx + t))
-        # curr_step.theta[1] = 2*pi*cos(2pi*(t))
-        # curr_step.theta[2] = 2*pi*cos(2pi*(dx+t))
-        # curr_step.theta[length(curr_step)] = 2*pi*cos(2pi*(x_max + t))
-        # curr_step.theta[length(curr_step) - 1] = 2*pi*cos(2pi*(x_max - dx + t))
-
         curr_step = timeStep(curr_step, RWZRightHandSide, (pot_vals, dx), dt)
         
         if cnt % plot_every == 0
-            println("T=" * string(t))
             plot!(x_data, curr_step.psi, label=string(t))
         end
+
+        push!(time_data, t)
+        push!(detector_data, curr_step.psi[detector_pos_index])
 
         t += dt
         cnt += 1
     end
 
-    println(t)
+    display(plot!(x_data, curr_step.psi, label="final"))
 
-    println("counted up to " * string(cnt))
-    plot!(x_data, curr_step.psi, label="final")
+    display(plot(time_data, abs.(detector_data), label="|Psi|"))
+    display(plot(time_data, log.(abs.(detector_data)), label="log|Psi|"))
+    plot(time_data, detector_data, label="Psi")
     
     # @printf("dt: %.6f,  Points: %d,  min: %.6f\n", dt, points, minimum(curr_step.psi))
 end
 
-main()
+main(x_points=8000, x_max=600, ell=2, parity=odd, gauss_mu=150, gauss_sigma=0.8, t_max=480, CFL_aplha=0.5)
