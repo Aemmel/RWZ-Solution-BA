@@ -66,11 +66,11 @@ function fillGhostPsi!(vals::Array{Float64}, orig::Wave, step_size)
     vals[i] = -4. *step_size*theta[i-1] - 10. / 3. * psi[i-1] + 6. * psi[i-2] - 2. * psi[i-3] + 1. / 3. * psi[i-4]
 
     i = 1
-    vals[i] = -20.0*step_size*theta[i+1] - 80. / 3. * psi[i+1] + 40. * psi[i+2] - 15. * psi[i+3] + 8. / 3. * psi[i+4]
-    # vals[i] = 5.0*theta[i+1] - 10. * psi[i+2] + 10. * psi[i+3] - 5. * psi[i+4] + psi[i+5]
+    # vals[i] = -20.0*step_size*theta[i+1] - 80. / 3. * psi[i+1] + 40. * psi[i+2] - 15. * psi[i+3] + 8. / 3. * psi[i+4]
+    vals[i] = 5.0*theta[i+1] - 10. * psi[i+2] + 10. * psi[i+3] - 5. * psi[i+4] + psi[i+5]
     i = length(psi)
-    vals[i] = -20.0*step_size*theta[i-1] - 80. / 3. * psi[i-1] + 40. * psi[i-2] - 15. * psi[i-3] + 8. / 3. * psi[i-4]
-    # vals[i] = 5.0*theta[i-1] - 10. * psi[i-2] + 10. * psi[i-3] - 5. * psi[i-4] + psi[i-5]
+    # vals[i] = -20.0*step_size*theta[i-1] - 80. / 3. * psi[i-1] + 40. * psi[i-2] - 15. * psi[i-3] + 8. / 3. * psi[i-4]
+    vals[i] = 5.0*theta[i-1] - 10. * psi[i-2] + 10. * psi[i-3] - 5. * psi[i-4] + psi[i-5]
 end
 
 # fill vals' ghost cells with rule for Theta (in C&G: Pi)
@@ -137,8 +137,8 @@ function RWZRightHandSide(w::Wave, (pot_vals, step_size)::Tuple{Array{Float64}, 
     psi = w.psi
     theta = w.theta
 
-    new_psi = copy(theta)
-    new_theta = copy(psi)
+    new_psi = zeros(length(w))
+    new_theta = zeros(length(w))
 
     fillGhostPsi!(new_theta, w, step_size)
     #fillGhostTheta!(new_psi, w) # does weird stuff when activated..
@@ -148,6 +148,9 @@ function RWZRightHandSide(w::Wave, (pot_vals, step_size)::Tuple{Array{Float64}, 
     for i = 1:length(new_theta)
         new_theta[i] -= pot_vals[i] * psi[i]
     end
+    new_psi[3:length(new_psi)-3] = w.theta[3:length(new_psi)-3]
+    #new_psi[1] = new_psi[2] = 0
+    #new_psi[length(new_psi)] = new_psi[length(new_psi)] = 0
 
     return Wave(new_psi, new_theta)
 end
@@ -196,16 +199,16 @@ function main(; x_points=4000,      # how many x points
     end
 
     # detector output
-    detector_pos = 250
+    detector_pos = 280
     detector_pos_index = searchsortedfirst(x_data, detector_pos)
     time_data = []      # x data for detector plot
     detector_data = []  # y data for detector plot
 
     cnt = 1
-    plot_every = 10000000
+    plot_every = 400
 
     plot(x_data, curr_step.psi, label="starting")
-    #plot!(x_data, calcPotential(odd, tortToSchwarz(x_data, 1), 5, 1))
+    #plot!(x_data, calcPotential(odd, tortToSchwarz(x_data, mass), ell, mass))
     #yaxis!((-2, 2))
 
     while t < t_max
@@ -222,6 +225,8 @@ function main(; x_points=4000,      # how many x points
         cnt += 1
     end
 
+    println("counted up to " * string(cnt))
+
     display(plot!(x_data, curr_step.psi, label="final"))
 
     display(plot(time_data, abs.(detector_data), label="|Psi|"))
@@ -231,4 +236,4 @@ function main(; x_points=4000,      # how many x points
     # @printf("dt: %.6f,  Points: %d,  min: %.6f\n", dt, points, minimum(curr_step.psi))
 end
 
-main(x_points=8000, x_max=600, ell=2, parity=odd, gauss_mu=150, gauss_sigma=0.8, t_max=480, CFL_aplha=0.5)
+main(x_points=1000, x_min=-300, x_max=300, ell=2, parity=even, gauss_mu=150, gauss_sigma=1/0.25, t_max=600, CFL_aplha=0.5)
