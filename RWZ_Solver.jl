@@ -11,10 +11,13 @@
 =#
 
 # is this the correct way of doing things? .. I don't know..
+# to include LambertW.jl
 push!(LOAD_PATH, pwd());
 
 using Plots
 using Printf
+using DataFrames
+using CSV
 
 import LambertW.lambertw
 
@@ -42,6 +45,11 @@ function tortToSchwarz(tort_vals, M)
     return 2. * M .* (1 .+ lambertw.(exp.(tort_vals ./ (2. * M) .- 1), 0))
 end
 
+# retarded time u = t - x
+function retardedTime(time, x; M=1)
+    return (time - x) / M
+end
+
 # finite Differencing according to Calabrese & Gundlach arxiv:0509119 eq. 15
 function finiteDiff!(deriv::Array{Float64}, vals::Array{Float64}, step_size)
     step_size_2 = 12. * step_size^2
@@ -66,11 +74,11 @@ function fillGhostPsi!(vals::Array{Float64}, orig::Wave, step_size)
     vals[i] = -4. *step_size*theta[i-1] - 10. / 3. * psi[i-1] + 6. * psi[i-2] - 2. * psi[i-3] + 1. / 3. * psi[i-4]
 
     i = 1
-    # vals[i] = -20.0*step_size*theta[i+1] - 80. / 3. * psi[i+1] + 40. * psi[i+2] - 15. * psi[i+3] + 8. / 3. * psi[i+4]
-    vals[i] = 5.0*theta[i+1] - 10. * psi[i+2] + 10. * psi[i+3] - 5. * psi[i+4] + psi[i+5]
+    vals[i] = -20.0*step_size*theta[i+1] - 80. / 3. * psi[i+1] + 40. * psi[i+2] - 15. * psi[i+3] + 8. / 3. * psi[i+4]
+    # vals[i] = 5.0*theta[i+1] - 10. * psi[i+2] + 10. * psi[i+3] - 5. * psi[i+4] + psi[i+5]
     i = length(psi)
-    # vals[i] = -20.0*step_size*theta[i-1] - 80. / 3. * psi[i-1] + 40. * psi[i-2] - 15. * psi[i-3] + 8. / 3. * psi[i-4]
-    vals[i] = 5.0*theta[i-1] - 10. * psi[i-2] + 10. * psi[i-3] - 5. * psi[i-4] + psi[i-5]
+    vals[i] = -20.0*step_size*theta[i-1] - 80. / 3. * psi[i-1] + 40. * psi[i-2] - 15. * psi[i-3] + 8. / 3. * psi[i-4]
+    # vals[i] = 5.0*theta[i-1] - 10. * psi[i-2] + 10. * psi[i-3] - 5. * psi[i-4] + psi[i-5]
 end
 
 # fill vals' ghost cells with rule for Theta (in C&G: Pi)
@@ -97,7 +105,7 @@ end
 # return either scalar at point r or Array at points r
 @enum Potential even odd
 function calcPotential(parity::Potential, r, l, M)
-    # potentials has form:
+    # potentials have form:
     # (1-2M/r)*... = fac_1 * fac_2
     fac_1 = 1.0 .- 2.0M ./ r # the same for even and odd potential
 
@@ -168,6 +176,13 @@ function initialDataGauss(x_data, mu, sigma)::Wave
     return Wave(gauss.(x_data), dgauss.(x_data))
 end
 
+function initialDataSinus(x_data, omega, x_0; amplitude=1)::Wave
+    sinus(x) = if (x >= x_0 && x <= x_0+2pi*omega) amplitude * sin(omega*(x-x_0)) else 0 end
+    dsinus(x) = if (x >= x_0 && x <= x_0+2pi*omega) omega*amplitude*cos(omega*(x-x_0)) else 0 end
+
+    return Wave(sinus.(x_data), dsinus.(x_data))
+end
+
 function main(; x_points=4000,      # how many x points
                 x_min=-400,         # minimum r_tortoise
                 x_max=+400,         # maximum r_tortoise
@@ -178,6 +193,9 @@ function main(; x_points=4000,      # how many x points
                 parity=odd,         # axial (odd) or polar (even) perturbation
                 gauss_mu=150,       # mu (offset) for gaussian package
                 gauss_sigma=1,      # sigma for gaussian package
+                plot_every=Inf,     # wie viele Zwischenschritte sollen festgehalten werden
+                detector_pos=280,   # position of the detector
+                output_dir="data/", # where to store the output
 )
     plotly()
 
@@ -185,8 +203,10 @@ function main(; x_points=4000,      # how many x points
     x_data = range(x_min, stop=x_max, length=x_points)
     dx = x_data[2] - x_data[1]
     curr_step = initialDataGauss(x_data, gauss_mu, gauss_sigma)
+    # curr_step = initialDataSinus(x_data, 1, 150)
     pot_vals = calcPotential(odd, tortToSchwarz(x_data, 1), ell, mass)
 
+    # init time
     dt = CFL_aplha * dx
     println("dt="*string(dt))
     println("dx="*string(dx))
@@ -199,27 +219,27 @@ function main(; x_points=4000,      # how many x points
     end
 
     # detector output
-    detector_pos = 280
     detector_pos_index = searchsortedfirst(x_data, detector_pos)
-    time_data = []      # x data for detector plot
-    detector_data = []  # y data for detector plot
+    output = DataFrame(T = Float64[], TRe = Float64[], Psi = Float64[])
+
+    # signal for animation
+    pert_signal = DataFrame(X = x_data)
 
     cnt = 1
-    plot_every = 400
 
-    plot(x_data, curr_step.psi, label="starting")
-    #plot!(x_data, calcPotential(odd, tortToSchwarz(x_data, mass), ell, mass))
-    #yaxis!((-2, 2))
+    # display(plot(x_data, curr_step.psi, label="starting"))
 
     while t < t_max
         curr_step = timeStep(curr_step, RWZRightHandSide, (pot_vals, dx), dt)
         
         if cnt % plot_every == 0
-            plot!(x_data, curr_step.psi, label=string(t))
+            # display(plot(x_data, curr_step.psi, label=string(t)))
+            pert_signal_name = "T=" * string(t)
+            #pert_signal."T=$t" = curr_step.psi
+            setproperty!(pert_signal, pert_signal_name, curr_step.psi)
         end
 
-        push!(time_data, t)
-        push!(detector_data, curr_step.psi[detector_pos_index])
+        push!(output, (t, t - detector_pos, curr_step.psi[detector_pos_index]))
 
         t += dt
         cnt += 1
@@ -227,13 +247,14 @@ function main(; x_points=4000,      # how many x points
 
     println("counted up to " * string(cnt))
 
-    display(plot!(x_data, curr_step.psi, label="final"))
+    file_name_detector = output_dir * "detector_output-pos=" * string(detector_pos) * ".csv"
+    CSV.write(file_name_detector, output, header=false)
 
-    display(plot(time_data, abs.(detector_data), label="|Psi|"))
-    display(plot(time_data, log.(abs.(detector_data)), label="log|Psi|"))
-    plot(time_data, detector_data, label="Psi")
-    
+    file_name_pert_signal = output_dir * "signal_evolution" * ".csv"
+    CSV.write(file_name_pert_signal, pert_signal, header=true)
+
+    # plot(x_data, curr_step.psi)
     # @printf("dt: %.6f,  Points: %d,  min: %.6f\n", dt, points, minimum(curr_step.psi))
 end
 
-main(x_points=1000, x_min=-300, x_max=300, ell=2, parity=even, gauss_mu=150, gauss_sigma=1/0.25, t_max=600, CFL_aplha=0.5)
+main(x_points=5000, x_min=-300, x_max=600, ell=2, parity=odd, gauss_mu=150, gauss_sigma=1, t_max=600, CFL_aplha=0.5, plot_every=100)
