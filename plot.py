@@ -36,7 +36,11 @@ def show_output(log_plot=False, save=False, file_name="detector"):
     setup_ax(ax)
 
     ax.set_xlabel(r"retarded time $u=t-r_*$")
-    ax.set_ylabel(r"$\Psi^{" + PARITY + r"}_{" + str(ELL) + r"0}$")
+
+    if log_plot:
+        ax.set_ylabel(r"$\log(\Psi^{" + PARITY + r"}_{" + str(ELL) + r"0})$")
+    else:
+        ax.set_ylabel(r"$\Psi^{" + PARITY + r"}_{" + str(ELL) + r"0}$")
 
     ax.set_title(r"Detector output at $r_* = " + str(DETECTOR_POS) + r"$ for IV of $\sigma=" + str(IV_SIGMA) + r"$")
 
@@ -67,7 +71,7 @@ def show_signal(save=False, file_name="signal"):
     
     ax.set_title(r"Signal evolution with IV of $\sigma=" + str(IV_SIGMA) + r"$")
 
-    ani = animation.FuncAnimation(fig, animate_pert, np.arange(start=1, stop=len(signal_data)), interval=100)
+    ani = animation.FuncAnimation(fig, animate_pert, np.arange(start=1, stop=len(signal_data)), interval=80)
     plt.show()
 
     if save:
@@ -75,5 +79,5 @@ def show_signal(save=False, file_name="signal"):
         ani.save(OUTPUT_PATH + file_name + ".mp4", writer=writer)
 
 
-# show_signal(save=True, file_name="signal_sig1")
+show_signal(save=False, file_name="signal_sig1")
 show_output(log_plot=True, save=True, file_name="detector_sig1")

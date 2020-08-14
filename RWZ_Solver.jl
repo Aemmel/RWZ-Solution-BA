@@ -52,51 +52,43 @@ end
 
 # finite Differencing according to Calabrese & Gundlach arxiv:0509119 eq. 15
 function finiteDiff!(deriv::Array{Float64}, vals::Array{Float64}, step_size)
-    step_size_2 = 12. * step_size^2
+    step_size_2_inv = 1 / (12. * step_size^2)
 
     for i=3:length(deriv)-2
-        deriv[i] = (-vals[i+2] - vals[i-2] + 16.0*(vals[i+1] + vals[i-1]) - 30.0 * vals[i]) / step_size_2
+        deriv[i] = (-vals[i+2] - vals[i-2] + 16.0*(vals[i+1] + vals[i-1]) - 30.0 * vals[i]) * step_size_2_inv
     end
 end
 
 # according to Calabrese & Gundlach arxiv:0509119 eq. 27-30
 # they start at -2, we at 1. So to convert, add 3 to the index position of C&G
-# fill vals' ghost cells with rule for Psi (in C&G: phi)
-function fillGhostPsi!(vals::Array{Float64}, orig::Wave, step_size)
-    # reference for readibility
-    psi = orig.psi
-    theta = orig.theta
-
+# fill psi's ghost cells with rule for Psi (in C&G: phi)
+function fillGhostPsi!(psi, theta, step_size)
     #### psi
     i = 2
-    vals[i] = -4. *step_size*theta[i+1] - 10. / 3. * psi[i+1] + 6. * psi[i+2] - 2. * psi[i+3] + 1. / 3. * psi[i+4]
+    psi[i] = -4. *step_size*theta[i+1] - 10. / 3. * psi[i+1] + 6. * psi[i+2] - 2. * psi[i+3] + 1. / 3. * psi[i+4]
     i = length(psi) - 1
-    vals[i] = -4. *step_size*theta[i-1] - 10. / 3. * psi[i-1] + 6. * psi[i-2] - 2. * psi[i-3] + 1. / 3. * psi[i-4]
+    psi[i] = -4. *step_size*theta[i-1] - 10. / 3. * psi[i-1] + 6. * psi[i-2] - 2. * psi[i-3] + 1. / 3. * psi[i-4]
 
     i = 1
-    vals[i] = -20.0*step_size*theta[i+1] - 80. / 3. * psi[i+1] + 40. * psi[i+2] - 15. * psi[i+3] + 8. / 3. * psi[i+4]
-    # vals[i] = 5.0*theta[i+1] - 10. * psi[i+2] + 10. * psi[i+3] - 5. * psi[i+4] + psi[i+5]
+    # psi[i] = -20.0*step_size*theta[i+1] - 80. / 3. * psi[i+1] + 40. * psi[i+2] - 15. * psi[i+3] + 8. / 3. * psi[i+4] # original from the paper
+    psi[i] = 5.0*psi[i+1] - 10. * psi[i+2] + 10. * psi[i+3] - 5. * psi[i+4] + psi[i+5] # extrapolate previous 5 values
     i = length(psi)
-    vals[i] = -20.0*step_size*theta[i-1] - 80. / 3. * psi[i-1] + 40. * psi[i-2] - 15. * psi[i-3] + 8. / 3. * psi[i-4]
-    # vals[i] = 5.0*theta[i-1] - 10. * psi[i-2] + 10. * psi[i-3] - 5. * psi[i-4] + psi[i-5]
+    # psi[i] = -20.0*step_size*theta[i-1] - 80. / 3. * psi[i-1] + 40. * psi[i-2] - 15. * psi[i-3] + 8. / 3. * psi[i-4]
+    psi[i] = 5.0*psi[i-1] - 10. * psi[i-2] + 10. * psi[i-3] - 5. * psi[i-4] + psi[i-5]
 end
 
 # fill vals' ghost cells with rule for Theta (in C&G: Pi)
-function fillGhostTheta!(vals::Array{Float64}, orig::Wave)
-    # reference for readibility
-    psi = orig.psi
-    theta = orig.theta
-
+function fillGhostTheta!(psi, theta)
     #### theta
     i = 2
-    vals[i] = 4. * theta[i+1] - 6. * theta[i+2] + 4. * theta[i+3] - theta[i+4]
+    theta[i] = 4. * theta[i+1] - 6. * theta[i+2] + 4. * theta[i+3] - theta[i+4]
     i = length(theta) - 1
-    vals[i] = 4. * theta[i-1] - 6. * theta[i-2] + 4. * theta[i-3] - theta[i-4]
+    theta[i] = 4. * theta[i-1] - 6. * theta[i-2] + 4. * theta[i-3] - theta[i-4]
     
     i = 1
-    vals[i] = 4. * theta[i+1] - 6. * theta[i+2] + 4. * theta[i+3] - theta[i+4]
+    theta[i] = 4. * theta[i+1] - 6. * theta[i+2] + 4. * theta[i+3] - theta[i+4]
     i = length(theta)
-    vals[i] = 4. * theta[i-1] - 6. * theta[i-2] + 4. * theta[i-3] - theta[i-4]
+    theta[i] = 4. * theta[i-1] - 6. * theta[i-2] + 4. * theta[i-3] - theta[i-4]
 end
 
 # RWZ Potential
@@ -145,20 +137,19 @@ function RWZRightHandSide(w::Wave, (pot_vals, step_size)::Tuple{Array{Float64}, 
     psi = w.psi
     theta = w.theta
 
-    new_psi = zeros(length(w))
-    new_theta = zeros(length(w))
+    new_psi = zeros(length(psi))
+    new_theta = zeros(length(theta))
 
-    fillGhostPsi!(new_theta, w, step_size)
-    #fillGhostTheta!(new_psi, w) # does weird stuff when activated..
+    fillGhostPsi!(psi, theta, step_size)
+    #fillGhostTheta!(psi, theta) # not needed because we have no finite differencing for theta
 
     finiteDiff!(new_theta, psi, step_size)
 
-    for i = 1:length(new_theta)
-        new_theta[i] -= pot_vals[i] * psi[i]
-    end
-    new_psi[3:length(new_psi)-3] = w.theta[3:length(new_psi)-3]
-    #new_psi[1] = new_psi[2] = 0
-    #new_psi[length(new_psi)] = new_psi[length(new_psi)] = 0
+    i = 3:length(new_theta)-2
+    new_theta[i] -= pot_vals[i] .* psi[i]
+
+    i = 3:length(new_psi)-2
+    new_psi[i] = theta[i]
 
     return Wave(new_psi, new_theta)
 end
@@ -183,7 +174,7 @@ function initialDataSinus(x_data, omega, x_0; amplitude=1)::Wave
     return Wave(sinus.(x_data), dsinus.(x_data))
 end
 
-function main(; x_points=4000,      # how many x points
+function main(; x_points=4000,      # how many (physical) x points
                 x_min=-400,         # minimum r_tortoise
                 x_max=+400,         # maximum r_tortoise
                 t_max=150,          # max time (starts at 0)
@@ -200,11 +191,11 @@ function main(; x_points=4000,      # how many x points
     plotly()
 
     # init data
-    x_data = range(x_min, stop=x_max, length=x_points)
+    x_data = range(x_min-2, stop=x_max+2, length=x_points)
     dx = x_data[2] - x_data[1]
     curr_step = initialDataGauss(x_data, gauss_mu, gauss_sigma)
     # curr_step = initialDataSinus(x_data, 1, 150)
-    pot_vals = calcPotential(odd, tortToSchwarz(x_data, 1), ell, mass)
+    pot_vals = calcPotential(parity, tortToSchwarz(x_data, mass), ell, mass)
 
     # init time
     dt = CFL_aplha * dx
@@ -223,7 +214,7 @@ function main(; x_points=4000,      # how many x points
     output = DataFrame(T = Float64[], TRe = Float64[], Psi = Float64[])
 
     # signal for animation
-    pert_signal = DataFrame(X = x_data)
+    pert_signal = DataFrame(X = x_data[3:length(x_data)-2])
 
     cnt = 1
 
@@ -235,8 +226,7 @@ function main(; x_points=4000,      # how many x points
         if cnt % plot_every == 0
             # display(plot(x_data, curr_step.psi, label=string(t)))
             pert_signal_name = "T=" * string(t)
-            #pert_signal."T=$t" = curr_step.psi
-            setproperty!(pert_signal, pert_signal_name, curr_step.psi)
+            setproperty!(pert_signal, pert_signal_name, curr_step.psi[3:length(x_data)-2])
         end
 
         push!(output, (t, t - detector_pos, curr_step.psi[detector_pos_index]))
@@ -257,4 +247,4 @@ function main(; x_points=4000,      # how many x points
     # @printf("dt: %.6f,  Points: %d,  min: %.6f\n", dt, points, minimum(curr_step.psi))
 end
 
-main(x_points=5000, x_min=-300, x_max=600, ell=2, parity=odd, gauss_mu=150, gauss_sigma=1, t_max=600, CFL_aplha=0.5, plot_every=100)
+main(x_points=15000, x_min=-300, x_max=300, ell=2, parity=even, gauss_mu=150, gauss_sigma=1, t_max=3000, CFL_aplha=0.5, plot_every=500)
