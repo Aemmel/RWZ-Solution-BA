@@ -18,6 +18,7 @@ using Plots
 using Printf
 using DataFrames
 using CSV
+using JSON
 
 import LambertW.lambertw
 
@@ -47,7 +48,7 @@ end
 
 # retarded time u = t - x
 function retardedTime(time, x; M=1)
-    return (time - x) / M
+    return (time - x) # / M
 end
 
 # finite Differencing according to Calabrese & Gundlach arxiv:0509119 eq. 15
@@ -57,6 +58,32 @@ function finiteDiff!(deriv::Array{Float64}, vals::Array{Float64}, step_size)
     for i=3:length(deriv)-2
         deriv[i] = (-vals[i+2] - vals[i-2] + 16.0*(vals[i+1] + vals[i-1]) - 30.0 * vals[i]) * step_size_2_inv
     end
+end
+
+function finiteDiffFirst!(deriv::Array{Float64}, vals::Array{Float64}, step_size)
+    step_size2 =  step_size * 2.0
+
+    for i=2:length(deriv)-1
+        deriv[i] = (vals[i+1]-vals[i-1]) / step_size2
+    end
+end
+
+function integrateFunc(xvals::Array{Float64}, yvals::Array{Float64}, step_size; from=-Inf, to=Inf)
+    res = 0.
+    step_size_half = step_size / 2.
+
+    if length(xvals) != length(yvals)
+        println("integrateFunc, dimensions don't match")
+        return nothing
+    end
+
+    for i=1:length(yvals)-1
+        if xvals[i] >= from && xvals[i] <= to
+            res += (yvals[i+1] + yvals[i]) * step_size_half
+        end
+    end
+
+    return res
 end
 
 # according to Calabrese & Gundlach arxiv:0509119 eq. 27-30
@@ -159,10 +186,10 @@ end
 function initialDataGauss(x_data, mu, sigma)::Wave
     sigma_2 = sigma*sigma
     fac = 1 / sigma / sqrt(2pi)
-    dfac = - fac / sigma
+    dfac = - fac / sigma_2
     
-    gauss(x) = fac * exp(-0.5*sigma_2*(x - mu)^2)
-    dgauss(x) = dfac * (x - mu) * exp(-0.5*sigma_2*(x - mu)^2)
+    gauss(x) = fac * exp(-0.5*(x - mu)^2 / sigma_2)
+    dgauss(x) = dfac * (x - mu) * exp(-0.5(x - mu)^2 / sigma_2)
 
     return Wave(gauss.(x_data), dgauss.(x_data))
 end
@@ -174,11 +201,66 @@ function initialDataSinus(x_data, omega, x_0; amplitude=1)::Wave
     return Wave(sinus.(x_data), dsinus.(x_data))
 end
 
-function main(; x_points=4000,      # how many (physical) x points
-                x_min=-400,         # minimum r_tortoise
-                x_max=+400,         # maximum r_tortoise
-                t_max=150,          # max time (starts at 0)
-                CFL_aplha=1,        # CFL for timestep
+#######################################
+# find the complex QNM frequency of the output
+# expects Psi values over time (not retarded time) and detector pos and gauss_mu(=x_0) and also position of photon orbit is needed
+function findQNMFreq(t, psi, x_detector, x_0, mass)
+    if length(t) != length(psi)
+        println("findQNMFreq: wrong dimensions")
+    end
+
+    # no QNMs should reach the detector before the initial data localized around x_0 was able to go to r=3M and then to the detector
+    t_min = x_0 + x_detector - 6*mass # 2 * (3M)
+    ind_t_min = 1
+    while t[ind_t_min] < t_min
+        ind_t_min += 1
+    end
+    t_trunc = t[ind_t_min:length(t)]
+    psi_trunc = log.(abs.(psi[ind_t_min:length(psi)])) # log|psi| because the minima and maxima are more defined
+
+    # function to find all the local minima of arr
+    find_max(arr) = begin
+        maxima_x = []
+        maxima_y = [] 
+        for i in 2:length(arr)-1 # reference previous and next values. Skip unimportant last values
+            if arr[i-1] < arr[i] && arr[i+1] <= arr[i]
+                push!(maxima_x, t_trunc[i])
+                push!(maxima_y, arr[i])
+            end
+        end
+
+        return maxima_x, maxima_y
+    end
+
+    maxima_x, maxima_y = find_max(psi_trunc)
+
+    # which indices to use
+    i_min = 1
+    i_max = length(maxima_x)
+
+    # skip the first one
+    i_min = 2
+
+    # only keep the evenly spaced (less than 5 percent deviation)
+    for i=i_min+1:i_max-1
+        dev = abs(maxima_x[i+1] - maxima_x[i]) / abs(maxima_x[i] - maxima_x[i-1])
+        max_dev = 0.17
+        if dev < 1 - max_dev || dev > 1 + max_dev
+            i_max = i
+            break
+        end
+    end
+
+    plot(t_trunc, psi_trunc)
+    scatter!(maxima_x[i_min:i_max], maxima_y[i_min:i_max])
+end
+
+# return detector output (DataFrame with Time, Retareded Time, Psi at detector)
+function run(; x_points=6000,      # how many (physical) x points
+                x_min=-300,         # minimum r_tortoise
+                x_max=+300,         # maximum r_tortoise
+                t_max=600,          # max time (starts at 0)
+                CFL_alpha=0.5,      # CFL for timestep
                 mass=1,             # mass of the black hole
                 ell=2,              # mode of the perturbation
                 parity=odd,         # axial (odd) or polar (even) perturbation
@@ -188,8 +270,6 @@ function main(; x_points=4000,      # how many (physical) x points
                 detector_pos=280,   # position of the detector
                 output_dir="data/", # where to store the output
 )
-    plotly()
-
     # init data
     x_data = range(x_min-2, stop=x_max+2, length=x_points)
     dx = x_data[2] - x_data[1]
@@ -198,7 +278,7 @@ function main(; x_points=4000,      # how many (physical) x points
     pot_vals = calcPotential(parity, tortToSchwarz(x_data, mass), ell, mass)
 
     # init time
-    dt = CFL_aplha * dx
+    dt = CFL_alpha * dx
     println("dt="*string(dt))
     println("dx="*string(dx))
     t = 0
@@ -206,7 +286,7 @@ function main(; x_points=4000,      # how many (physical) x points
     # CFL condition
     if dt > dx
         println("CFL condition not met!")
-        return -1
+        # return -1
     end
 
     # detector output
@@ -245,6 +325,65 @@ function main(; x_points=4000,      # how many (physical) x points
 
     # plot(x_data, curr_step.psi)
     # @printf("dt: %.6f,  Points: %d,  min: %.6f\n", dt, points, minimum(curr_step.psi))
+
+    return output
 end
 
-main(x_points=15000, x_min=-300, x_max=300, ell=2, parity=even, gauss_mu=150, gauss_sigma=1, t_max=3000, CFL_aplha=0.5, plot_every=500)
+function compute_energy(params, max_ell)
+    # only save retarded time
+    output_init = run(ell=2, parity=odd, detector_pos=params["detector_pos"], mass=params["mass"], gauss_sigma=params["gauss_sigma"], gauss_mu=params["gauss_mu"])
+    t_re = output_init[!,2]
+    #output_psi_odd = output_init[!,3]
+    #output_psi_even_l2 = convert(Matrix, run(ell=2, parity=even, detector_pos=params["detector_pos"], mass=params["mass"], gauss_sigma=params["gauss_sigma"], gauss_mu=params["gauss_mu"])[!,2:3])'
+
+    step_size = abs(t_re[2]-t_re[1])
+
+    # init
+    dt_psi_squared_o = zeros(length(t_re))
+    dt_psi_squared_e = zeros(length(t_re))
+    
+    energy = 0
+
+    # get all the data
+    for ell = 2:max_ell
+        psi_odd = run(ell=ell, parity=odd, detector_pos=params["detector_pos"], mass=params["mass"], gauss_sigma=params["gauss_sigma"], gauss_mu=params["gauss_mu"])[!,3]
+        psi_even = run(ell=ell, parity=even, detector_pos=params["detector_pos"], mass=params["mass"], gauss_sigma=params["gauss_sigma"], gauss_mu=params["gauss_mu"])[!,3]
+        println("\nDONE WITH ell=" * string(ell) * "\n")
+
+        finiteDiffFirst!(dt_psi_squared_o, psi_odd, step_size)
+        dt_psi_squared_o = dt_psi_squared_o.^2
+        finiteDiffFirst!(dt_psi_squared_e, psi_even, step_size)
+        dt_psi_squared_e = dt_psi_squared_e.^2
+
+        dt_psi_squared_int_o = integrateFunc(t_re, dt_psi_squared_o, step_size, from=0)
+        dt_psi_squared_int_e = integrateFunc(t_re, dt_psi_squared_e, step_size, from=0)
+
+        # according to energy formula from thesis (or Nagar&Rezz 2006, eq: 88/89)
+        Lambda = ell*(ell+1)
+        energy += Lambda*(Lambda-2)*(dt_psi_squared_int_o + dt_psi_squared_int_e)
+    end
+
+    energy /= 16pi
+
+    return energy
+    # h = 0.0000001
+    # x1 = 0:h:5
+    # x2 = 0:h/2.:5
+    # println(length(x2))
+    # println(integrateFunc(collect(x1), exp.(x1), h, from=2, to=4.5))
+    # println(integrateFunc(collect(x2), exp.(x2), h/2. , from=2, to=4.5))
+end
+
+obj = JSON.parsefile("params.json")
+
+if obj["parity"] == "odd"
+    parity = odd
+else
+    parity = even
+end
+
+plotly()
+out = run(x_points=6000, ell=obj["ell"], parity=parity, gauss_sigma=obj["gauss_sigma"], plot_every=200, 
+    t_max=600, x_max=300, x_min=-300, detector_pos=obj["detector_pos"], gauss_mu=obj["gauss_mu"], CFL_alpha=0.5, mass=obj["mass"])
+
+#compute_energy(obj, 10)

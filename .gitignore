@@ -23,5 +23,7 @@ docs/site/
 # environment.
 Manifest.toml
 
-# don't save .dat's
+# don't save .dat's or plots
 *.dat
+*.pdf
+*.mp4
