@@ -201,60 +201,6 @@ function initialDataSinus(x_data, omega, x_0; amplitude=1)::Wave
     return Wave(sinus.(x_data), dsinus.(x_data))
 end
 
-#######################################
-# find the complex QNM frequency of the output
-# expects Psi values over time (not retarded time) and detector pos and gauss_mu(=x_0) and also position of photon orbit is needed
-function findQNMFreq(t, psi, x_detector, x_0, mass)
-    if length(t) != length(psi)
-        println("findQNMFreq: wrong dimensions")
-    end
-
-    # no QNMs should reach the detector before the initial data localized around x_0 was able to go to r=3M and then to the detector
-    t_min = x_0 + x_detector - 6*mass # 2 * (3M)
-    ind_t_min = 1
-    while t[ind_t_min] < t_min
-        ind_t_min += 1
-    end
-    t_trunc = t[ind_t_min:length(t)]
-    psi_trunc = log.(abs.(psi[ind_t_min:length(psi)])) # log|psi| because the minima and maxima are more defined
-
-    # function to find all the local minima of arr
-    find_max(arr) = begin
-        maxima_x = []
-        maxima_y = [] 
-        for i in 2:length(arr)-1 # reference previous and next values. Skip unimportant last values
-            if arr[i-1] < arr[i] && arr[i+1] <= arr[i]
-                push!(maxima_x, t_trunc[i])
-                push!(maxima_y, arr[i])
-            end
-        end
-
-        return maxima_x, maxima_y
-    end
-
-    maxima_x, maxima_y = find_max(psi_trunc)
-
-    # which indices to use
-    i_min = 1
-    i_max = length(maxima_x)
-
-    # skip the first one
-    i_min = 2
-
-    # only keep the evenly spaced (less than 5 percent deviation)
-    for i=i_min+1:i_max-1
-        dev = abs(maxima_x[i+1] - maxima_x[i]) / abs(maxima_x[i] - maxima_x[i-1])
-        max_dev = 0.17
-        if dev < 1 - max_dev || dev > 1 + max_dev
-            i_max = i
-            break
-        end
-    end
-
-    plot(t_trunc, psi_trunc)
-    scatter!(maxima_x[i_min:i_max], maxima_y[i_min:i_max])
-end
-
 # return detector output (DataFrame with Time, Retareded Time, Psi at detector)
 function run(; x_points=6000,      # how many (physical) x points
                 x_min=-300,         # minimum r_tortoise
@@ -330,8 +276,9 @@ function run(; x_points=6000,      # how many (physical) x points
 end
 
 function compute_energy(params, max_ell)
+    x_points = 25000
     # only save retarded time
-    output_init = run(ell=2, parity=odd, detector_pos=params["detector_pos"], mass=params["mass"], gauss_sigma=params["gauss_sigma"], gauss_mu=params["gauss_mu"])
+    output_init = run(ell=2, parity=odd, detector_pos=params["detector_pos"], mass=params["mass"], gauss_sigma=params["gauss_sigma"], gauss_mu=params["gauss_mu"], x_points=x_points)
     t_re = output_init[!,2]
     #output_psi_odd = output_init[!,3]
     #output_psi_even_l2 = convert(Matrix, run(ell=2, parity=even, detector_pos=params["detector_pos"], mass=params["mass"], gauss_sigma=params["gauss_sigma"], gauss_mu=params["gauss_mu"])[!,2:3])'
@@ -346,8 +293,8 @@ function compute_energy(params, max_ell)
 
     # get all the data
     for ell = 2:max_ell
-        psi_odd = run(ell=ell, parity=odd, detector_pos=params["detector_pos"], mass=params["mass"], gauss_sigma=params["gauss_sigma"], gauss_mu=params["gauss_mu"])[!,3]
-        psi_even = run(ell=ell, parity=even, detector_pos=params["detector_pos"], mass=params["mass"], gauss_sigma=params["gauss_sigma"], gauss_mu=params["gauss_mu"])[!,3]
+        psi_odd = run(ell=ell, parity=odd, detector_pos=params["detector_pos"], mass=params["mass"], gauss_sigma=params["gauss_sigma"], gauss_mu=params["gauss_mu"], x_points=x_points)[!,3]
+        psi_even = run(ell=ell, parity=even, detector_pos=params["detector_pos"], mass=params["mass"], gauss_sigma=params["gauss_sigma"], gauss_mu=params["gauss_mu"], x_points=x_points)[!,3]
         println("\nDONE WITH ell=" * string(ell) * "\n")
 
         finiteDiffFirst!(dt_psi_squared_o, psi_odd, step_size)
@@ -383,7 +330,7 @@ else
 end
 
 plotly()
-out = run(x_points=6000, ell=obj["ell"], parity=parity, gauss_sigma=obj["gauss_sigma"], plot_every=200, 
-    t_max=600, x_max=300, x_min=-300, detector_pos=obj["detector_pos"], gauss_mu=obj["gauss_mu"], CFL_alpha=0.5, mass=obj["mass"])
+# out = run(x_points=50000, ell=obj["ell"], parity=parity, gauss_sigma=obj["gauss_sigma"], plot_every=Inf, 
+#    t_max=600, x_max=300, x_min=-300, detector_pos=obj["detector_pos"], gauss_mu=obj["gauss_mu"], CFL_alpha=0.5, mass=obj["mass"])
 
-#compute_energy(obj, 10)
+compute_energy(obj, 10)

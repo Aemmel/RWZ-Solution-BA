@@ -235,8 +235,8 @@ file_name += "sig=" + str(IV_SIGMA)
 save_all = True
 #save_all = False
 
-show_signal(save=False, file_name="signal_" + file_name)
-show_output(log_plot=True, save=False, file_name="detector_" + file_name)
-show_output(log_plot=False, save=False, file_name="detector_" + file_name)
+#show_signal(save=False, file_name="signal_" + file_name)
+#show_output(log_plot=True, save=False, file_name="detector_" + file_name)
+show_output(log_plot=False, save=True, file_name="N_x=5e4" + file_name)
 #QNMs(save=True, file_name="QNM_" + file_name)
 #tail(save=True, file_name="BC_tail_" + file_name)
